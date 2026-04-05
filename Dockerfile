@@ -5,14 +5,12 @@ COPY pom.xml .
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-
 # Stage 2: Create the final image
-FROM openjdk:17-jdk-alpine
+FROM eclipse-temurin:17-jdk-alpine
 WORKDIR /app
 
 # Copy the app files
 COPY --from=build /app/target/Heroku_Application.jar /app/app.jar
 
-# Expose the port and run the app
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
