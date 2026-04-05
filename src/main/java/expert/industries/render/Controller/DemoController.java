@@ -1,6 +1,6 @@
-package heroku.Controller;
+package expert.industries.render.Controller;
 
-import heroku.Entity.AdvanceCalculation;
+import expert.industries.render.Entity.AdvanceCalculation;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -25,14 +25,10 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
-import java.net.URL;
 import java.nio.file.*;
-import java.time.Duration;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 
 @RestController
@@ -42,7 +38,7 @@ public class DemoController {
     @GetMapping("/api/Welcome")
     @Operation(summary = "Welcome Data")
     public String hello() {
-        return "Welcome to Biswajit Framework";
+        return "Welcome to Expert Industries";
     }
 
 
@@ -459,11 +455,12 @@ public class DemoController {
         System.out.println(Name);
 
         Map<String, Double> map = new HashMap<>();
-        map.put("Dadasaheb kolhe", 103.75);
+        map.put("Dadasaheb kolhe", 118.75);
         map.put("Gajanan Raut", 81.25);
         map.put("Bhagyavendra singh", 100.00);
-        map.put("Sourabh Bhosale", 64.12);
         map.put("Salim Mohameed", 93.75);
+        map.put("alim", 93.75);
+        map.put("Mahindra", 93.75);
 
         
 

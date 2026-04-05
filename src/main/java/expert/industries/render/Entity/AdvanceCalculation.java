@@ -1,4 +1,4 @@
-package heroku.Entity;
+package expert.industries.render.Entity;
 
 public class AdvanceCalculation {
 
