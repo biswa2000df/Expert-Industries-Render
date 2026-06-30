@@ -456,9 +456,9 @@ public class DemoController {
 
         Map<String, Double> map = new HashMap<>();
         map.put("Dadasaheb kolhe", 118.75);
-        map.put("Gajanan Raut", 81.25);
+        map.put("Gajanan Raut", 90.00);
         map.put("Bhagyavendra singh", 100.00);
-        map.put("Salim Mohameed", 93.75);
+        map.put("Salim Mohameed", 106.25);
         map.put("alim", 93.75);
         map.put("Mahindra", 93.75);
 
