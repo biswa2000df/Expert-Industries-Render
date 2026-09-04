@@ -1992,13 +1992,6 @@ private static String findAttendanceColumnHeader(
                     )
             )
     })
-
-    
-    @PostMapping("/AdvanceSalaryCalculation")
-@Operation(
-        summary = "Advance Calculation",
-        description = "Final advance and salary calculation"
-)
 public synchronized ResponseEntity<String> processData(
         @RequestBody AdvanceCalculation advanceCalculation) {
 
