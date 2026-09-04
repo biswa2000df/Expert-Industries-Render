@@ -391,52 +391,102 @@ public class DemoController {
     }
 
 
-    private static String checkAndGetUpdatedTime(String cellValue){
+//     private static String checkAndGetUpdatedTime(String cellValue){
 
-        ArrayList<String> al = new ArrayList<String>();
+//         ArrayList<String> al = new ArrayList<String>();
 
-        String beforespace = "";
+//         String beforespace = "";
 
-        for(int i = 0; i< cellValue.length(); i++){
-            if(cellValue.charAt(i) == '\n' )
-            {
-                al.add(beforespace);
-                beforespace = "";
-            }else{
-                beforespace = beforespace + cellValue.charAt(i);
-            }
-        }
+//         for(int i = 0; i< cellValue.length(); i++){
+//             if(cellValue.charAt(i) == '\n' )
+//             {
+//                 al.add(beforespace);
+//                 beforespace = "";
+//             }else{
+//                 beforespace = beforespace + cellValue.charAt(i);
+//             }
+//         }
 
-        if (!beforespace.isEmpty()) {
-            al.add(beforespace);
-        }
+//         if (!beforespace.isEmpty()) {
+//             al.add(beforespace);
+//         }
 
-        String presentAndAbsent = al.get(al.size()-1);
-        String totalTime = al.get(al.size()-2);
+//         String presentAndAbsent = al.get(al.size()-1);
+//         String totalTime = al.get(al.size()-2);
 
-        // Define formatter to parse and format the time in "H:mm" format
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("H:mm");
+//         // Define formatter to parse and format the time in "H:mm" format
+//         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("H:mm");
 
-        // Parse the string to LocalTime
-        LocalTime time = LocalTime.parse(totalTime, formatter);
+//         // Parse the string to LocalTime
+//         LocalTime time = LocalTime.parse(totalTime, formatter);
 
-        if(presentAndAbsent.equalsIgnoreCase("MIS")){
-            return "MIS";
-        }
+//         if(presentAndAbsent.equalsIgnoreCase("MIS")){
+//             return "MIS";
+//         }
 
-        if(presentAndAbsent.equalsIgnoreCase("P")) {
-            // Check if the time is less than 12:00 (noon)
-            if (time.isBefore(LocalTime.NOON)) {
-                // Subtract 30 minutes
-                time = time.minusMinutes(30);
-            }
-        }
-        // Convert back to string for display
-        String updatedTimeString = time.format(formatter);
+//         if(presentAndAbsent.equalsIgnoreCase("P")) {
+//             // Check if the time is less than 12:00 (noon)
+//             if (time.isBefore(LocalTime.NOON)) {
+//                 // Subtract 30 minutes
+//                 time = time.minusMinutes(30);
+//             }
+//         }
+//         // Convert back to string for display
+//         String updatedTimeString = time.format(formatter);
 
-//        System.out.println("Updated Time: " + updatedTimeString);
-        return updatedTimeString.replaceAll(":",".");
+// //        System.out.println("Updated Time: " + updatedTimeString);
+//         return updatedTimeString.replaceAll(":",".");
+//     }
+
+    private static String checkAndGetUpdatedTime(String cellValue) {
+
+    if (cellValue == null || cellValue.trim().isEmpty()) {
+        return "";
     }
+
+    String[] lines = cellValue.trim().split("\\R");
+
+    if (lines.length < 2) {
+        throw new IllegalArgumentException(
+                "Invalid cell value. Expected total time and attendance status."
+        );
+    }
+
+    String presentAndAbsent = lines[lines.length - 1].trim();
+    String totalTime = lines[lines.length - 2].trim();
+
+    if (presentAndAbsent.equalsIgnoreCase("MIS")) {
+        return "MIS";
+    }
+
+    String[] timeParts = totalTime.split(":");
+
+    if (timeParts.length != 2) {
+        throw new IllegalArgumentException(
+                "Invalid time format: " + totalTime + ". Expected H:mm."
+        );
+    }
+
+    int hours = Integer.parseInt(timeParts[0]);
+    int minutes = Integer.parseInt(timeParts[1]);
+
+    if (hours < 0 || minutes < 0 || minutes > 59) {
+        throw new IllegalArgumentException(
+                "Invalid duration: " + totalTime
+        );
+    }
+
+    int totalMinutes = (hours * 60) + minutes;
+
+    if (presentAndAbsent.equalsIgnoreCase("P")) {
+        totalMinutes = Math.max(0, totalMinutes - 30);
+    }
+
+    int updatedHours = totalMinutes / 60;
+    int updatedMinutes = totalMinutes % 60;
+
+    return String.format("%d.%02d", updatedHours, updatedMinutes);
+}
 
     public static Double readEmpNameAndCalculateSalary(ArrayList<String> firstRowValue) {
         String EmpNameFormat = null;
@@ -451,16 +501,17 @@ public class DemoController {
         }
         System.out.println(EmpNameFormat);
 
-        Name = EmpNameFormat.split(":")[1].trim();
+        // Name = EmpNameFormat.split(":")[1].trim().toLowerCase();
+        Name = EmpNameFormat.split(":")[1].trim().toLowerCase();
         System.out.println(Name);
 
         Map<String, Double> map = new HashMap<>();
-        map.put("Dadasaheb kolhe", 118.75);
-        map.put("Gajanan Raut", 90.00);
-        map.put("Bhagyavendra singh", 100.00);
-        map.put("Salim Mohameed", 106.25);
+        map.put("dadasaheb", 118.75);
+        map.put("gajanan", 90.00);
+        map.put("bhagyavendra", 100.00);
+        map.put("salim", 106.25);
         map.put("alim", 93.75);
-        map.put("Mahindra", 93.75);
+        map.put("mahindra", 93.75);
 
         
 
@@ -468,7 +519,7 @@ public class DemoController {
 
 
         for (Map.Entry<String, Double> entry : map.entrySet()) {
-            if (entry.getKey().contains(Name)) {
+            if (entry.getKey().equalsIgnoreCase(Name)) {
                 perHourSalary = entry.getValue();
                 break;
             }
