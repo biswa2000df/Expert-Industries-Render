@@ -946,19 +946,14 @@ public synchronized ResponseEntity<String> motiExcelSheet() {
     salaryCell.setCellStyle(normalStyle);
 }
 
-    private static XSSFCellStyle createPrintTitleStyle(
+  private static XSSFCellStyle createPrintTitleStyle(
         XSSFWorkbook workbook) {
 
     XSSFCellStyle style =
             createBorderedCenteredStyle(workbook);
 
-    style.setFillForegroundColor(
-            IndexedColors.DARK_BLUE.getIndex()
-    );
-
-    style.setFillPattern(
-            FillPatternType.SOLID_FOREGROUND
-    );
+    // Plain white background
+    style.setFillPattern(FillPatternType.NO_FILL);
 
     XSSFFont font =
             workbook.createFont();
@@ -966,7 +961,7 @@ public synchronized ResponseEntity<String> motiExcelSheet() {
     font.setBold(true);
     font.setFontName("Times New Roman");
     font.setFontHeightInPoints((short) 16);
-    font.setColor(IndexedColors.WHITE.getIndex());
+    font.setColor(IndexedColors.BLACK.getIndex());
 
     style.setFont(font);
 
@@ -1024,13 +1019,8 @@ private static XSSFCellStyle createPrintBlockTitleStyle(
     XSSFCellStyle style =
             createBorderedCenteredStyle(workbook);
 
-    style.setFillForegroundColor(
-            IndexedColors.LIGHT_CORNFLOWER_BLUE.getIndex()
-    );
-
-    style.setFillPattern(
-            FillPatternType.SOLID_FOREGROUND
-    );
+    // Remove the blue background
+    style.setFillPattern(FillPatternType.NO_FILL);
 
     XSSFFont font =
             workbook.createFont();
@@ -1038,6 +1028,10 @@ private static XSSFCellStyle createPrintBlockTitleStyle(
     font.setBold(true);
     font.setFontName("Times New Roman");
     font.setFontHeightInPoints((short) 12);
+    font.setColor(IndexedColors.BLACK.getIndex());
+
+    // Optional underline for section titles
+    font.setUnderline(Font.U_SINGLE);
 
     style.setFont(font);
 
@@ -1052,19 +1046,15 @@ private static XSSFCellStyle createPrintDayHeaderStyle(
 
     style.setWrapText(true);
 
-    style.setFillForegroundColor(
-            IndexedColors.LIGHT_BLUE.getIndex()
-    );
-
-    style.setFillPattern(
-            FillPatternType.SOLID_FOREGROUND
-    );
+    // Remove light-blue background
+    style.setFillPattern(FillPatternType.NO_FILL);
 
     XSSFFont font =
             workbook.createFont();
 
     font.setBold(true);
     font.setFontName("Times New Roman");
+    font.setColor(IndexedColors.BLACK.getIndex());
 
     style.setFont(font);
 
@@ -2636,36 +2626,25 @@ private static void removeRowByMarker(
         return style;
     }
 
-    private static XSSFCellStyle createFinalSummaryStyle(
-            XSSFWorkbook workbook) {
+private static XSSFCellStyle createFinalSummaryStyle(
+        XSSFWorkbook workbook) {
 
-        XSSFCellStyle style =
-                workbook.createCellStyle();
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
 
-        style.setBorderTop(BorderStyle.THIN);
-        style.setBorderBottom(BorderStyle.THIN);
-        style.setBorderLeft(BorderStyle.THIN);
-        style.setBorderRight(BorderStyle.THIN);
+    style.setFillPattern(FillPatternType.NO_FILL);
 
-        style.setAlignment(
-                HorizontalAlignment.CENTER
-        );
+    XSSFFont font =
+            workbook.createFont();
 
-        XSSFFont font =
-                workbook.createFont();
+    font.setBold(true);
+    font.setFontName("Times New Roman");
+    font.setColor(IndexedColors.BLACK.getIndex());
 
-        font.setBold(true);
-        font.setFontName("Times New Roman");
-        font.setItalic(true);
+    style.setFont(font);
 
-        font.setColor(
-                IndexedColors.BLACK.getIndex()
-        );
-
-        style.setFont(font);
-
-        return style;
-    }
+    return style;
+}
 
     // ================================================================
     // COMMON HELPER METHODS
