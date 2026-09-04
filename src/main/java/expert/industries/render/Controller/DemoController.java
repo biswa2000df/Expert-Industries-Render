@@ -1967,31 +1967,32 @@ private static String findAttendanceColumnHeader(
     // ADVANCE AND FINAL SALARY API
     // ================================================================
 
-    @Operation(
-            summary = "Advance Calculation",
-            description = "Final advance and salary calculation"
-    )
-    @ApiResponses(value = {
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Advance calculation completed",
-                    content = @Content(mediaType = "text/plain")
-            ),
-            @ApiResponse(
-                    responseCode = "400",
-                    description = "Bad request",
-                    content = @Content(
-                            schema = @Schema(hidden = true)
-                    )
-            ),
-            @ApiResponse(
-                    responseCode = "500",
-                    description = "Internal server error",
-                    content = @Content(
-                            schema = @Schema(hidden = true)
-                    )
-            )
-    })
+@Operation(
+        summary = "Advance Calculation",
+        description = "Final advance and salary calculation"
+)
+@ApiResponses(value = {
+        @ApiResponse(
+                responseCode = "200",
+                description = "Advance calculation completed",
+                content = @Content(mediaType = "text/plain")
+        ),
+        @ApiResponse(
+                responseCode = "400",
+                description = "Bad request",
+                content = @Content(
+                        schema = @Schema(hidden = true)
+                )
+        ),
+        @ApiResponse(
+                responseCode = "500",
+                description = "Internal server error",
+                content = @Content(
+                        schema = @Schema(hidden = true)
+                )
+        )
+})
+@PostMapping("/AdvanceSalaryCalculation")
 public synchronized ResponseEntity<String> processData(
         @RequestBody AdvanceCalculation advanceCalculation) {
 
