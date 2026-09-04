@@ -506,18 +506,15 @@ public class DemoController {
         System.out.println(Name);
 
         Map<String, Double> map = new HashMap<>();
-        map.put("dadasaheb", 118.75);
-        map.put("gajanan", 90.00);
-        map.put("bhagyavendra", 100.00);
-        map.put("salim", 106.25);
+        map.put("dadasaheb kolhe", 118.75);
+        map.put("gajanan Raut", 90.00);
+        map.put("bhagyavendra singh", 100.00);
+        map.put("salim Mohameed", 106.25);
         map.put("alim", 93.75);
         map.put("mahindra", 93.75);
+    
 
         
-
-
-
-
         for (Map.Entry<String, Double> entry : map.entrySet()) {
             if (entry.getKey().equalsIgnoreCase(Name)) {
                 perHourSalary = entry.getValue();
