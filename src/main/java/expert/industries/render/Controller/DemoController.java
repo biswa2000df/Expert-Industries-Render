@@ -19,6 +19,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import org.apache.poi.ss.util.CellRangeAddress;
 
 import java.io.*;
 import java.nio.file.*;
@@ -36,6 +37,29 @@ public class DemoController {
 
     private static final String UPLOAD_DIR =
             System.getProperty("user.dir") + File.separator;
+    private static final String SOURCE_SHEET_NAME = "Sheet1";
+
+private static final String PRINT_SHEET_NAME =
+        "Working_Hours_Print";
+
+private static final String WORKING_SUMMARY_MARKER =
+        "CALCULATED_WORKING_HOURS";
+
+private static final String FINAL_SUMMARY_MARKER =
+        "FINAL_SALARY_SUMMARY";
+
+private static final String PRINT_FINAL_MARKER =
+        "FINAL_CALCULATION_SECTION";
+
+private static final int ATTENDANCE_ROW_INDEX = 4;
+
+private static final int FIRST_ATTENDANCE_COLUMN_INDEX = 1;
+
+private static final int DAYS_PER_PRINT_BLOCK = 8;
+
+private static final int MINIMUM_MONTH_DAYS = 28;
+
+private static final int MAXIMUM_MONTH_DAYS = 31;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -374,27 +398,23 @@ public class DemoController {
     // WORKING HOURS CALCULATION API
     // ================================================================
 
-    @GetMapping("/api/MotiExcelSheet/WorkingHourCount")
-    @Operation(summary = "Moti Excel Sheet Working Hour Count")
-    public synchronized ResponseEntity<String> motiExcelSheet() {
 
-        if (uploadedFileName == null ||
-                uploadedFileName.trim().isEmpty()) {
 
-            return ResponseEntity
-                    .badRequest()
-                    .body("Please upload an Excel file first.");
-        }
+@GetMapping("/api/MotiExcelSheet/WorkingHourCount")
+@Operation(summary = "Moti Excel Sheet Working Hour Count")
+public synchronized ResponseEntity<String> motiExcelSheet() {
 
-        Path excelFilePath;
+    if (uploadedFileName == null ||
+            uploadedFileName.trim().isEmpty()) {
 
-        try {
-            excelFilePath = getSafeFilePath(uploadedFileName);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(e.getMessage());
-        }
+        return ResponseEntity
+                .badRequest()
+                .body("Please upload an Excel file first.");
+    }
+
+    try {
+        Path excelFilePath =
+                getSafeFilePath(uploadedFileName);
 
         if (!Files.exists(excelFilePath)) {
             return ResponseEntity
@@ -402,21 +422,26 @@ public class DemoController {
                     .body("Uploaded Excel file was not found.");
         }
 
-        try (FileInputStream fileInputStream =
+        try (FileInputStream inputStream =
                      new FileInputStream(excelFilePath.toFile());
 
              XSSFWorkbook workbook =
-                     new XSSFWorkbook(fileInputStream)) {
+                     new XSSFWorkbook(inputStream)) {
 
-            XSSFSheet sheet = workbook.getSheet("Sheet1");
+            XSSFSheet sourceSheet =
+                    workbook.getSheet(SOURCE_SHEET_NAME);
 
-            if (sheet == null) {
+            if (sourceSheet == null) {
                 return ResponseEntity
                         .badRequest()
-                        .body("Sheet1 was not found in the Excel file.");
+                        .body(
+                                SOURCE_SHEET_NAME +
+                                " was not found in the Excel file."
+                        );
             }
 
-            Row firstRow = sheet.getRow(0);
+            Row firstRow =
+                    sourceSheet.getRow(0);
 
             if (firstRow == null) {
                 return ResponseEntity
@@ -424,62 +449,64 @@ public class DemoController {
                         .body("The first row is empty.");
             }
 
-            /*
-             * Your existing code processes row number 5.
-             * Apache POI row index starts from zero, so index 4
-             * represents Excel row 5.
-             */
-            Row attendanceRow = sheet.getRow(4);
+            Row attendanceRow =
+                    sourceSheet.getRow(ATTENDANCE_ROW_INDEX);
 
             if (attendanceRow == null) {
                 return ResponseEntity
                         .badRequest()
                         .body(
-                                "Attendance data was not found in Excel row 5."
+                                "Attendance data was not found " +
+                                "in Excel row 5."
                         );
             }
-
-            XSSFCellStyle normalStyle =
-                    createNormalCellStyle(workbook);
-
-            XSSFCellStyle misStyle =
-                    createMisCellStyle(workbook);
 
             ArrayList<String> firstRowValues =
                     readRowValues(firstRow);
 
-            /*
-             * This method sets employeeName and returns the
-             * employee's hourly salary.
-             */
             perHourSalary =
-                    readEmpNameAndCalculateSalary(firstRowValues);
-
-            List<String> updatedTimes = new ArrayList<>();
+                    readEmpNameAndCalculateSalary(
+                            firstRowValues
+                    );
 
             int lastAttendanceColumn =
-                    attendanceRow.getLastCellNum();
+                    detectLastAttendanceColumn(
+                            attendanceRow
+                    );
 
-            if (lastAttendanceColumn <= 1) {
+            int totalAttendanceDays =
+                    lastAttendanceColumn -
+                    FIRST_ATTENDANCE_COLUMN_INDEX;
+
+            if (totalAttendanceDays < MINIMUM_MONTH_DAYS ||
+                    totalAttendanceDays > MAXIMUM_MONTH_DAYS) {
+
                 return ResponseEntity
                         .badRequest()
                         .body(
-                                "No attendance values were found in Excel row 5."
+                                "Expected attendance data for 28, 29, " +
+                                "30 or 31 days, but found " +
+                                totalAttendanceDays +
+                                " day columns."
                         );
             }
 
-            /*
-             * Begin with column index 1 because column zero
-             * is not attendance data in your original code.
-             */
-            for (int columnIndex = 1;
+            List<String> updatedTimes =
+                    new ArrayList<>();
+
+            int totalMinutes = 0;
+
+            for (int columnIndex =
+                         FIRST_ATTENDANCE_COLUMN_INDEX;
                  columnIndex < lastAttendanceColumn;
                  columnIndex++) {
 
-                Cell attendanceCell = attendanceRow.getCell(
-                        columnIndex,
-                        Row.MissingCellPolicy.CREATE_NULL_AS_BLANK
-                );
+                Cell attendanceCell =
+                        attendanceRow.getCell(
+                                columnIndex,
+                                Row.MissingCellPolicy
+                                        .CREATE_NULL_AS_BLANK
+                        );
 
                 String cellValue =
                         getCellValue(attendanceCell);
@@ -488,131 +515,119 @@ public class DemoController {
                         checkAndGetUpdatedTime(cellValue);
 
                 updatedTimes.add(updatedTime);
-            }
 
-            if (updatedTimes.isEmpty()) {
-                return ResponseEntity
-                        .badRequest()
-                        .body("No working-hour records were found.");
-            }
-
-            int summaryRowIndex =
-                    sheet.getLastRowNum() + 1;
-
-            Row workingHoursSummaryRow =
-                    sheet.createRow(summaryRowIndex);
-
-            int totalMinutes = 0;
-
-            for (int index = 0;
-                 index < updatedTimes.size();
-                 index++) {
-
-                int excelColumnIndex = index + 1;
-
-                String updatedTime =
-                        updatedTimes.get(index);
-
-                Cell outputCell =
-                        workingHoursSummaryRow.createCell(
-                                excelColumnIndex
-                        );
-
-                if ("MIS".equalsIgnoreCase(updatedTime)) {
-                    outputCell.setCellValue("0.00");
-                    outputCell.setCellStyle(misStyle);
-                    continue;
+                if (!"MIS".equalsIgnoreCase(updatedTime)) {
+                    totalMinutes +=
+                            convertDurationToMinutes(
+                                    updatedTime
+                            );
                 }
-
-                outputCell.setCellValue(updatedTime);
-                outputCell.setCellStyle(normalStyle);
-
-                totalMinutes += convertDurationToMinutes(
-                        updatedTime
-                );
             }
 
-            /*
-             * Correct payroll conversion.
-             *
-             * Example:
-             * 40 hours 30 minutes = 40.5 hours
-             * It must not be treated as 40.30 hours.
-             */
-            totalMonthlyWorkingHours = totalMinutes / 60.0;
+            totalMonthlyWorkingHours =
+                    totalMinutes / 60.0;
 
             totalSalaryPerMonth =
-                    totalMonthlyWorkingHours * perHourSalary;
+                    totalMonthlyWorkingHours *
+                    perHourSalary;
 
-            int totalHoursColumn = lastAttendanceColumn;
-            int totalSalaryColumn = lastAttendanceColumn + 1;
+            /*
+             * Initial final values before AdvanceSalaryCalculation
+             * is called.
+             */
+            afterMISandHolidayHrs_TotalCalculationHrs =
+                    0.0;
 
-            Cell totalHoursCell =
-                    workingHoursSummaryRow.createCell(
-                            totalHoursColumn
-                    );
+            afterMIS_FinalWorkHrs =
+                    totalMonthlyWorkingHours;
 
-            totalHoursCell.setCellValue(
-                    totalMonthlyWorkingHours
+            beforeAdvanceCalculation_TotalSalary =
+                    totalSalaryPerMonth;
+
+            afterAllCalculationCompleted_TotalSalary =
+                    totalSalaryPerMonth;
+
+            /*
+             * Remove an older generated working-hour row to
+             * prevent duplicate output.
+             */
+            removeRowByMarker(
+                    sourceSheet,
+                    WORKING_SUMMARY_MARKER,
+                    1
             );
 
-            totalHoursCell.setCellStyle(normalStyle);
-
-            Cell salaryCell =
-                    workingHoursSummaryRow.createCell(
-                            totalSalaryColumn
-                    );
-
-            salaryCell.setCellValue(
-                    totalSalaryPerMonth
+            writeWorkingHoursSummaryToSourceSheet(
+                    workbook,
+                    sourceSheet,
+                    updatedTimes,
+                    lastAttendanceColumn
             );
 
-            salaryCell.setCellStyle(normalStyle);
+            /*
+             * Create/recreate Working_Hours_Print.
+             */
+            createPrintFriendlyWorkingHoursSheet(
+                    workbook,
+                    sourceSheet,
+                    attendanceRow,
+                    updatedTimes,
+                    totalMinutes
+            );
 
             workingHourCalculationCompleted = true;
 
-            try (FileOutputStream fileOutputStream =
+            try (FileOutputStream outputStream =
                          new FileOutputStream(
                                  excelFilePath.toFile()
                          )) {
 
-                workbook.write(fileOutputStream);
+                workbook.write(outputStream);
             }
-
-            return ResponseEntity.ok(
-                    "Working hours updated successfully. " +
-                    "Employee: " + employeeName +
-                    ", Per-hour salary: " +
-                    formatMoney(perHourSalary) +
-                    ", Total working hours: " +
-                    formatNumber(totalMonthlyWorkingHours) +
-                    ", Salary before adjustments: " +
-                    formatMoney(totalSalaryPerMonth)
-            );
-
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity
-                    .badRequest()
-                    .body("Validation error: " + e.getMessage());
-
-        } catch (IOException e) {
-            return ResponseEntity
-                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(
-                            "Unable to process Excel file: " +
-                            e.getMessage()
-                    );
-
-        } catch (Exception e) {
-            return ResponseEntity
-                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(
-                            "Unexpected error while calculating hours: " +
-                            e.getMessage()
-                    );
         }
-    }
 
+        return ResponseEntity.ok(
+                "Working hours updated successfully in " +
+                SOURCE_SHEET_NAME +
+                " and " +
+                PRINT_SHEET_NAME +
+                ". Employee: " +
+                formatEmployeeName(employeeName) +
+                ", Per-hour salary: " +
+                formatMoney(perHourSalary) +
+                ", Total working hours: " +
+                formatNumber(totalMonthlyWorkingHours) +
+                ", Salary before adjustments: " +
+                formatMoney(totalSalaryPerMonth)
+        );
+
+    } catch (IllegalArgumentException e) {
+        return ResponseEntity
+                .badRequest()
+                .body(
+                        "Validation error: " +
+                        e.getMessage()
+                );
+
+    } catch (IOException e) {
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(
+                        "Unable to process Excel file: " +
+                        e.getMessage()
+                );
+
+    } catch (Exception e) {
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(
+                        "Unexpected error while calculating hours: " +
+                        e.getMessage()
+                );
+    }
+}
+
+    
     // ================================================================
     // CELL VALUE READER
     // ================================================================
@@ -654,6 +669,59 @@ public class DemoController {
 
         return rowValues;
     }
+
+
+    private static int detectLastAttendanceColumn(
+        Row attendanceRow) {
+
+    if (attendanceRow == null) {
+        return FIRST_ATTENDANCE_COLUMN_INDEX;
+    }
+
+    int lastCellNumber =
+            attendanceRow.getLastCellNum();
+
+    if (lastCellNumber < 0) {
+        return FIRST_ATTENDANCE_COLUMN_INDEX;
+    }
+
+    /*
+     * Do not permit more than 31 attendance columns.
+     */
+    int maximumExclusiveColumn =
+            Math.min(
+                    lastCellNumber,
+                    FIRST_ATTENDANCE_COLUMN_INDEX +
+                    MAXIMUM_MONTH_DAYS
+            );
+
+    int lastPopulatedColumn =
+            FIRST_ATTENDANCE_COLUMN_INDEX;
+
+    for (int columnIndex =
+                 FIRST_ATTENDANCE_COLUMN_INDEX;
+         columnIndex < maximumExclusiveColumn;
+         columnIndex++) {
+
+        Cell cell =
+                attendanceRow.getCell(
+                        columnIndex,
+                        Row.MissingCellPolicy
+                                .RETURN_BLANK_AS_NULL
+                );
+
+        String value =
+                getCellValue(cell);
+
+        if (!value.isEmpty()) {
+            lastPopulatedColumn =
+                    columnIndex + 1;
+        }
+    }
+
+    return lastPopulatedColumn;
+}
+    
 
     // ================================================================
     // DAILY DURATION CALCULATION
@@ -805,6 +873,998 @@ public class DemoController {
         return (hours * 60) + minutes;
     }
 
+    private static void writeWorkingHoursSummaryToSourceSheet(
+        XSSFWorkbook workbook,
+        XSSFSheet sourceSheet,
+        List<String> updatedTimes,
+        int lastAttendanceColumn) {
+
+    XSSFCellStyle normalStyle =
+            createNormalCellStyle(workbook);
+
+    XSSFCellStyle misStyle =
+            createMisCellStyle(workbook);
+
+    int summaryRowIndex =
+            sourceSheet.getLastRowNum() + 1;
+
+    Row summaryRow =
+            sourceSheet.createRow(summaryRowIndex);
+
+    Cell markerCell =
+            summaryRow.createCell(0);
+
+    markerCell.setCellValue(
+            WORKING_SUMMARY_MARKER
+    );
+
+    markerCell.setCellStyle(normalStyle);
+
+    for (int index = 0;
+         index < updatedTimes.size();
+         index++) {
+
+        int columnIndex =
+                FIRST_ATTENDANCE_COLUMN_INDEX +
+                index;
+
+        String updatedTime =
+                updatedTimes.get(index);
+
+        Cell outputCell =
+                summaryRow.createCell(columnIndex);
+
+        if ("MIS".equalsIgnoreCase(updatedTime)) {
+            outputCell.setCellValue("0.00");
+            outputCell.setCellStyle(misStyle);
+        } else {
+            outputCell.setCellValue(updatedTime);
+            outputCell.setCellStyle(normalStyle);
+        }
+    }
+
+    Cell totalHoursCell =
+            summaryRow.createCell(
+                    lastAttendanceColumn
+            );
+
+    totalHoursCell.setCellValue(
+            totalMonthlyWorkingHours
+    );
+
+    totalHoursCell.setCellStyle(normalStyle);
+
+    Cell salaryCell =
+            summaryRow.createCell(
+                    lastAttendanceColumn + 1
+            );
+
+    salaryCell.setCellValue(
+            totalSalaryPerMonth
+    );
+
+    salaryCell.setCellStyle(normalStyle);
+}
+
+    private static XSSFCellStyle createPrintTitleStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    style.setFillForegroundColor(
+            IndexedColors.DARK_BLUE.getIndex()
+    );
+
+    style.setFillPattern(
+            FillPatternType.SOLID_FOREGROUND
+    );
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setBold(true);
+    font.setFontName("Times New Roman");
+    font.setFontHeightInPoints((short) 16);
+    font.setColor(IndexedColors.WHITE.getIndex());
+
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createPrintInfoLabelStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    style.setAlignment(HorizontalAlignment.LEFT);
+
+    style.setFillForegroundColor(
+            IndexedColors.GREY_25_PERCENT.getIndex()
+    );
+
+    style.setFillPattern(
+            FillPatternType.SOLID_FOREGROUND
+    );
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setBold(true);
+    font.setFontName("Times New Roman");
+
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createPrintInfoValueStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    style.setAlignment(HorizontalAlignment.LEFT);
+    style.setWrapText(true);
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setFontName("Times New Roman");
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createPrintBlockTitleStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    style.setFillForegroundColor(
+            IndexedColors.LIGHT_CORNFLOWER_BLUE.getIndex()
+    );
+
+    style.setFillPattern(
+            FillPatternType.SOLID_FOREGROUND
+    );
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setBold(true);
+    font.setFontName("Times New Roman");
+    font.setFontHeightInPoints((short) 12);
+
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createPrintDayHeaderStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    style.setWrapText(true);
+
+    style.setFillForegroundColor(
+            IndexedColors.LIGHT_BLUE.getIndex()
+    );
+
+    style.setFillPattern(
+            FillPatternType.SOLID_FOREGROUND
+    );
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setBold(true);
+    font.setFontName("Times New Roman");
+
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createPrintWorkingHourStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    style.setWrapText(true);
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setFontName("Times New Roman");
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createPrintMisStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    style.setFillForegroundColor(
+            IndexedColors.RED.getIndex()
+    );
+
+    style.setFillPattern(
+            FillPatternType.SOLID_FOREGROUND
+    );
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setBold(true);
+    font.setFontName("Times New Roman");
+    font.setColor(IndexedColors.WHITE.getIndex());
+
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createPrintTotalLabelStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    style.setAlignment(HorizontalAlignment.LEFT);
+
+    style.setFillForegroundColor(
+            IndexedColors.LIGHT_GREEN.getIndex()
+    );
+
+    style.setFillPattern(
+            FillPatternType.SOLID_FOREGROUND
+    );
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setBold(true);
+    font.setFontName("Times New Roman");
+
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createPrintTotalValueStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            createBorderedCenteredStyle(workbook);
+
+    DataFormat dataFormat =
+            workbook.createDataFormat();
+
+    style.setDataFormat(
+            dataFormat.getFormat("0.00")
+    );
+
+    XSSFFont font =
+            workbook.createFont();
+
+    font.setBold(true);
+    font.setFontName("Times New Roman");
+
+    style.setFont(font);
+
+    return style;
+}
+
+private static XSSFCellStyle createBorderedCenteredStyle(
+        XSSFWorkbook workbook) {
+
+    XSSFCellStyle style =
+            workbook.createCellStyle();
+
+    style.setAlignment(HorizontalAlignment.CENTER);
+    style.setVerticalAlignment(VerticalAlignment.CENTER);
+
+    style.setBorderTop(BorderStyle.THIN);
+    style.setBorderBottom(BorderStyle.THIN);
+    style.setBorderLeft(BorderStyle.THIN);
+    style.setBorderRight(BorderStyle.THIN);
+
+    return style;
+}
+    private static String formatDurationFromMinutes(
+        int totalMinutes) {
+
+    int safeMinutes =
+            Math.max(0, totalMinutes);
+
+    int hours =
+            safeMinutes / 60;
+
+    int minutes =
+            safeMinutes % 60;
+
+    return String.format(
+            Locale.ROOT,
+            "%d:%02d",
+            hours,
+            minutes
+    );
+}
+
+private static String formatEmployeeName(
+        String name) {
+
+    if (name == null ||
+            name.trim().isEmpty()) {
+
+        return "";
+    }
+
+    String[] parts =
+            name.trim().split("\\s+");
+
+    StringBuilder result =
+            new StringBuilder();
+
+    for (String part : parts) {
+
+        if (part.isEmpty()) {
+            continue;
+        }
+
+        if (result.length() > 0) {
+            result.append(" ");
+        }
+
+        result.append(
+                Character.toUpperCase(
+                        part.charAt(0)
+                )
+        );
+
+        if (part.length() > 1) {
+            result.append(
+                    part.substring(1)
+                            .toLowerCase(Locale.ROOT)
+            );
+        }
+    }
+
+    return result.toString();
+}
+
+    private static void createPrintFriendlyWorkingHoursSheet(
+        XSSFWorkbook workbook,
+        XSSFSheet sourceSheet,
+        Row attendanceRow,
+        List<String> updatedTimes,
+        int totalWorkedMinutes) {
+
+    int existingSheetIndex =
+            workbook.getSheetIndex(
+                    PRINT_SHEET_NAME
+            );
+
+    if (existingSheetIndex >= 0) {
+        workbook.removeSheetAt(
+                existingSheetIndex
+        );
+    }
+
+    XSSFSheet printSheet =
+            workbook.createSheet(
+                    PRINT_SHEET_NAME
+            );
+
+    configurePrintSheet(
+            workbook,
+            printSheet
+    );
+
+    XSSFCellStyle titleStyle =
+            createPrintTitleStyle(workbook);
+
+    XSSFCellStyle labelStyle =
+            createPrintInfoLabelStyle(workbook);
+
+    XSSFCellStyle valueStyle =
+            createPrintInfoValueStyle(workbook);
+
+    XSSFCellStyle blockTitleStyle =
+            createPrintBlockTitleStyle(workbook);
+
+    XSSFCellStyle headerStyle =
+            createPrintDayHeaderStyle(workbook);
+
+    XSSFCellStyle workingHourStyle =
+            createPrintWorkingHourStyle(workbook);
+
+    XSSFCellStyle misStyle =
+            createPrintMisStyle(workbook);
+
+    XSSFCellStyle totalLabelStyle =
+            createPrintTotalLabelStyle(workbook);
+
+    XSSFCellStyle totalValueStyle =
+            createPrintTotalValueStyle(workbook);
+
+    int currentRowIndex = 0;
+
+    /*
+     * Main title.
+     */
+    Row titleRow =
+            printSheet.createRow(currentRowIndex++);
+
+    titleRow.setHeightInPoints(28);
+
+    Cell titleCell =
+            titleRow.createCell(0);
+
+    titleCell.setCellValue(
+            "Employee Working Hours Summary"
+    );
+
+    titleCell.setCellStyle(titleStyle);
+
+    printSheet.addMergedRegion(
+            new CellRangeAddress(
+                    titleRow.getRowNum(),
+                    titleRow.getRowNum(),
+                    0,
+                    DAYS_PER_PRINT_BLOCK
+            )
+    );
+
+    currentRowIndex++;
+
+    currentRowIndex =
+            createPrintInformationRow(
+                    printSheet,
+                    currentRowIndex,
+                    "Employee Name",
+                    formatEmployeeName(employeeName),
+                    labelStyle,
+                    valueStyle
+            );
+
+    currentRowIndex =
+            createPrintInformationRow(
+                    printSheet,
+                    currentRowIndex,
+                    "Per Hour Salary",
+                    formatMoney(perHourSalary),
+                    labelStyle,
+                    valueStyle
+            );
+
+    currentRowIndex++;
+
+    int totalAttendanceDays =
+            updatedTimes.size();
+
+    int totalBlocks =
+            (totalAttendanceDays +
+             DAYS_PER_PRINT_BLOCK - 1) /
+            DAYS_PER_PRINT_BLOCK;
+
+    /*
+     * Dynamic block handling:
+     *
+     * 28 = 8 + 8 + 8 + 4
+     * 29 = 8 + 8 + 8 + 5
+     * 30 = 8 + 8 + 8 + 6
+     * 31 = 8 + 8 + 8 + 7
+     */
+    for (int blockIndex = 0;
+         blockIndex < totalBlocks;
+         blockIndex++) {
+
+        int startDayIndex =
+                blockIndex *
+                DAYS_PER_PRINT_BLOCK;
+
+        int endDayIndex =
+                Math.min(
+                        startDayIndex +
+                        DAYS_PER_PRINT_BLOCK,
+                        totalAttendanceDays
+                );
+
+        Row blockTitleRow =
+                printSheet.createRow(
+                        currentRowIndex++
+                );
+
+        Cell blockTitleCell =
+                blockTitleRow.createCell(0);
+
+        blockTitleCell.setCellValue(
+                "Attendance Days " +
+                (startDayIndex + 1) +
+                " to " +
+                endDayIndex
+        );
+
+        blockTitleCell.setCellStyle(
+                blockTitleStyle
+        );
+
+        printSheet.addMergedRegion(
+                new CellRangeAddress(
+                        blockTitleRow.getRowNum(),
+                        blockTitleRow.getRowNum(),
+                        0,
+                        DAYS_PER_PRINT_BLOCK
+                )
+        );
+
+        Row dayHeaderRow =
+                printSheet.createRow(
+                        currentRowIndex++
+                );
+
+        Row attendanceDetailRow =
+                printSheet.createRow(
+                        currentRowIndex++
+                );
+
+        Row calculatedHoursRow =
+                printSheet.createRow(
+                        currentRowIndex++
+                );
+
+        Cell dayLabelCell =
+                dayHeaderRow.createCell(0);
+
+        dayLabelCell.setCellValue("Day / Date");
+        dayLabelCell.setCellStyle(headerStyle);
+
+        Cell attendanceLabelCell =
+                attendanceDetailRow.createCell(0);
+
+        attendanceLabelCell.setCellValue(
+                "Attendance Detail"
+        );
+
+        attendanceLabelCell.setCellStyle(
+                headerStyle
+        );
+
+        Cell calculatedLabelCell =
+                calculatedHoursRow.createCell(0);
+
+        calculatedLabelCell.setCellValue(
+                "Calculated Hours"
+        );
+
+        calculatedLabelCell.setCellStyle(
+                headerStyle
+        );
+
+        int printColumnIndex = 1;
+
+        for (int dayIndex = startDayIndex;
+             dayIndex < endDayIndex;
+             dayIndex++) {
+
+            int sourceColumnIndex =
+                    FIRST_ATTENDANCE_COLUMN_INDEX +
+                    dayIndex;
+
+            String dayHeader =
+                    findAttendanceColumnHeader(
+                            sourceSheet,
+                            attendanceRow.getRowNum(),
+                            sourceColumnIndex,
+                            dayIndex + 1
+                    );
+
+            String attendanceDetails =
+                    getCellValue(
+                            attendanceRow.getCell(
+                                    sourceColumnIndex,
+                                    Row.MissingCellPolicy
+                                            .CREATE_NULL_AS_BLANK
+                            )
+                    );
+
+            String calculatedTime =
+                    updatedTimes.get(dayIndex);
+
+            Cell dayCell =
+                    dayHeaderRow.createCell(
+                            printColumnIndex
+                    );
+
+            dayCell.setCellValue(dayHeader);
+            dayCell.setCellStyle(headerStyle);
+
+            Cell attendanceCell =
+                    attendanceDetailRow.createCell(
+                            printColumnIndex
+                    );
+
+            attendanceCell.setCellValue(
+                    attendanceDetails
+            );
+
+            attendanceCell.setCellStyle(
+                    workingHourStyle
+            );
+
+            Cell calculatedCell =
+                    calculatedHoursRow.createCell(
+                            printColumnIndex
+                    );
+
+            if ("MIS".equalsIgnoreCase(
+                    calculatedTime)) {
+
+                calculatedCell.setCellValue("0.00");
+                calculatedCell.setCellStyle(misStyle);
+
+            } else {
+                calculatedCell.setCellValue(
+                        calculatedTime
+                );
+
+                calculatedCell.setCellStyle(
+                        workingHourStyle
+                );
+            }
+
+            printColumnIndex++;
+        }
+
+        /*
+         * Add blank bordered cells to complete the
+         * final group of eight.
+         */
+        while (printColumnIndex <=
+                DAYS_PER_PRINT_BLOCK) {
+
+            Cell emptyHeaderCell =
+                    dayHeaderRow.createCell(
+                            printColumnIndex
+                    );
+
+            emptyHeaderCell.setCellStyle(
+                    headerStyle
+            );
+
+            Cell emptyAttendanceCell =
+                    attendanceDetailRow.createCell(
+                            printColumnIndex
+                    );
+
+            emptyAttendanceCell.setCellStyle(
+                    workingHourStyle
+            );
+
+            Cell emptyCalculatedCell =
+                    calculatedHoursRow.createCell(
+                            printColumnIndex
+                    );
+
+            emptyCalculatedCell.setCellStyle(
+                    workingHourStyle
+            );
+
+            printColumnIndex++;
+        }
+
+        currentRowIndex++;
+    }
+
+    /*
+     * Normal working-hour calculation.
+     */
+    Row workingCalculationTitleRow =
+            printSheet.createRow(
+                    currentRowIndex++
+            );
+
+    Cell workingCalculationTitleCell =
+            workingCalculationTitleRow.createCell(0);
+
+    workingCalculationTitleCell.setCellValue(
+            "WORKING HOURS CALCULATION"
+    );
+
+    workingCalculationTitleCell.setCellStyle(
+            blockTitleStyle
+    );
+
+    printSheet.addMergedRegion(
+            new CellRangeAddress(
+                    workingCalculationTitleRow.getRowNum(),
+                    workingCalculationTitleRow.getRowNum(),
+                    0,
+                    DAYS_PER_PRINT_BLOCK
+            )
+    );
+
+    currentRowIndex =
+            createPrintCalculationRow(
+                    printSheet,
+                    currentRowIndex,
+                    "Total Working Duration",
+                    formatDurationFromMinutes(
+                            totalWorkedMinutes
+                    ),
+                    totalLabelStyle,
+                    valueStyle
+            );
+
+    currentRowIndex =
+            createPrintCalculationRow(
+                    printSheet,
+                    currentRowIndex,
+                    "Total Decimal Working Hours",
+                    totalMonthlyWorkingHours,
+                    totalLabelStyle,
+                    totalValueStyle
+            );
+
+    currentRowIndex =
+            createPrintCalculationRow(
+                    printSheet,
+                    currentRowIndex,
+                    "Per Hour Salary",
+                    perHourSalary,
+                    totalLabelStyle,
+                    totalValueStyle
+            );
+
+    currentRowIndex =
+            createPrintCalculationRow(
+                    printSheet,
+                    currentRowIndex,
+                    "Salary Before Adjustments",
+                    totalSalaryPerMonth,
+                    totalLabelStyle,
+                    totalValueStyle
+            );
+
+    currentRowIndex++;
+
+    /*
+     * Final calculation section.
+     * AdvanceSalaryCalculation updates this section.
+     */
+    Row finalMarkerRow =
+            printSheet.createRow(
+                    currentRowIndex++
+            );
+
+    Cell finalMarkerCell =
+            finalMarkerRow.createCell(0);
+
+    finalMarkerCell.setCellValue(
+            PRINT_FINAL_MARKER
+    );
+
+    finalMarkerCell.setCellStyle(
+            blockTitleStyle
+    );
+
+    printSheet.addMergedRegion(
+            new CellRangeAddress(
+                    finalMarkerRow.getRowNum(),
+                    finalMarkerRow.getRowNum(),
+                    0,
+                    DAYS_PER_PRINT_BLOCK
+            )
+    );
+
+    createOrUpdatePrintFinalCalculationRows(
+            printSheet,
+            currentRowIndex,
+            0.0,
+            0.0,
+            0.0,
+            totalLabelStyle,
+            totalValueStyle
+    );
+
+    printSheet.setColumnWidth(
+            0,
+            25 * 256
+    );
+
+    for (int columnIndex = 1;
+         columnIndex <= DAYS_PER_PRINT_BLOCK;
+         columnIndex++) {
+
+        printSheet.setColumnWidth(
+                columnIndex,
+                16 * 256
+        );
+    }
+
+    printSheet.createFreezePane(0, 5);
+
+    int printSheetIndex =
+            workbook.getSheetIndex(printSheet);
+
+    workbook.setPrintArea(
+            printSheetIndex,
+            0,
+            DAYS_PER_PRINT_BLOCK,
+            0,
+            printSheet.getLastRowNum()
+    );
+}
+
+    private static void configurePrintSheet(
+        XSSFWorkbook workbook,
+        XSSFSheet printSheet) {
+
+    PrintSetup printSetup =
+            printSheet.getPrintSetup();
+
+    printSetup.setPaperSize(
+            PrintSetup.A4_PAPERSIZE
+    );
+
+    printSetup.setLandscape(true);
+    printSetup.setFitWidth((short) 1);
+    printSetup.setFitHeight((short) 0);
+
+    printSheet.setFitToPage(true);
+    printSheet.setAutobreaks(true);
+    printSheet.setHorizontallyCenter(true);
+
+    printSheet.setMargin(
+            Sheet.LeftMargin,
+            0.25
+    );
+
+    printSheet.setMargin(
+            Sheet.RightMargin,
+            0.25
+    );
+
+    printSheet.setMargin(
+            Sheet.TopMargin,
+            0.50
+    );
+
+    printSheet.setMargin(
+            Sheet.BottomMargin,
+            0.50
+    );
+}
+
+private static int createPrintInformationRow(
+        XSSFSheet printSheet,
+        int rowIndex,
+        String label,
+        String value,
+        XSSFCellStyle labelStyle,
+        XSSFCellStyle valueStyle) {
+
+    Row row =
+            printSheet.createRow(rowIndex);
+
+    Cell labelCell =
+            row.createCell(0);
+
+    labelCell.setCellValue(label);
+    labelCell.setCellStyle(labelStyle);
+
+    Cell valueCell =
+            row.createCell(1);
+
+    valueCell.setCellValue(value);
+    valueCell.setCellStyle(valueStyle);
+
+    printSheet.addMergedRegion(
+            new CellRangeAddress(
+                    rowIndex,
+                    rowIndex,
+                    1,
+                    DAYS_PER_PRINT_BLOCK
+            )
+    );
+
+    return rowIndex + 1;
+}
+
+private static int createPrintCalculationRow(
+        XSSFSheet printSheet,
+        int rowIndex,
+        String label,
+        Object value,
+        XSSFCellStyle labelStyle,
+        XSSFCellStyle valueStyle) {
+
+    Row row =
+            printSheet.getRow(rowIndex);
+
+    if (row == null) {
+        row = printSheet.createRow(rowIndex);
+    }
+
+    Cell labelCell =
+            row.getCell(
+                    0,
+                    Row.MissingCellPolicy
+                            .CREATE_NULL_AS_BLANK
+            );
+
+    labelCell.setCellValue(label);
+    labelCell.setCellStyle(labelStyle);
+
+    Cell valueCell =
+            row.getCell(
+                    1,
+                    Row.MissingCellPolicy
+                            .CREATE_NULL_AS_BLANK
+            );
+
+    setCellValue(valueCell, value);
+    valueCell.setCellStyle(valueStyle);
+
+    return rowIndex + 1;
+}
+
+private static String findAttendanceColumnHeader(
+        XSSFSheet sourceSheet,
+        int attendanceRowIndex,
+        int columnIndex,
+        int fallbackDayNumber) {
+
+    DataFormatter formatter =
+            new DataFormatter();
+
+    for (int rowIndex =
+                 attendanceRowIndex - 1;
+         rowIndex >= 0;
+         rowIndex--) {
+
+        Row row =
+                sourceSheet.getRow(rowIndex);
+
+        if (row == null) {
+            continue;
+        }
+
+        Cell cell =
+                row.getCell(
+                        columnIndex,
+                        Row.MissingCellPolicy
+                                .RETURN_BLANK_AS_NULL
+                );
+
+        if (cell == null) {
+            continue;
+        }
+
+        String header =
+                formatter
+                        .formatCellValue(cell)
+                        .trim();
+
+        if (!header.isEmpty()) {
+            return header;
+        }
+    }
+
+    return "Day " + fallbackDayNumber;
+}
+
     // ================================================================
     // EMPLOYEE SALARY CALCULATION
     // ================================================================
@@ -932,230 +1992,212 @@ public class DemoController {
                     )
             )
     })
+
+    
     @PostMapping("/AdvanceSalaryCalculation")
-    public synchronized ResponseEntity<String> processData(
-            @RequestBody AdvanceCalculation advanceCalculation) {
+@Operation(
+        summary = "Advance Calculation",
+        description = "Final advance and salary calculation"
+)
+public synchronized ResponseEntity<String> processData(
+        @RequestBody AdvanceCalculation advanceCalculation) {
 
-        if (!workingHourCalculationCompleted) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(
-                            "Please execute WorkingHourCount API " +
-                            "before AdvanceSalaryCalculation API."
-                    );
-        }
-
-        if (advanceCalculation == null) {
-            return ResponseEntity
-                    .badRequest()
-                    .body("Advance calculation request is required.");
-        }
-
-        double holidayHours =
-                advanceCalculation.getHolidayHrs();
-
-        double misHours =
-                advanceCalculation.getMisHrs();
-
-        double advanceSalary =
-                advanceCalculation.getAdvance();
-
-        if (holidayHours < 0) {
-            return ResponseEntity
-                    .badRequest()
-                    .body("Holiday hours cannot be negative.");
-        }
-
-        if (misHours < 0) {
-            return ResponseEntity
-                    .badRequest()
-                    .body("MIS hours cannot be negative.");
-        }
-
-        if (advanceSalary < 0) {
-            return ResponseEntity
-                    .badRequest()
-                    .body("Advance salary cannot be negative.");
-        }
-
-        try {
-            afterMISandHolidayHrs_TotalCalculationHrs =
-                    holidayHours + misHours;
-
-            afterMIS_FinalWorkHrs =
-                    totalMonthlyWorkingHours +
-                    afterMISandHolidayHrs_TotalCalculationHrs;
-
-            beforeAdvanceCalculation_TotalSalary =
-                    afterMIS_FinalWorkHrs *
-                    perHourSalary;
-
-            afterAllCalculationCompleted_TotalSalary =
-                    beforeAdvanceCalculation_TotalSalary -
-                    advanceSalary;
-
-            /*
-             * If advance is greater than calculated salary,
-             * prevent a negative payable salary.
-             *
-             * If your business rule allows negative balances,
-             * remove this Math.max line.
-             */
-            afterAllCalculationCompleted_TotalSalary =
-                    Math.max(
-                            0,
-                            afterAllCalculationCompleted_TotalSalary
-                    );
-
-            finalSalaryUpdate(
-                    holidayHours,
-                    misHours,
-                    advanceSalary
-            );
-
-            return ResponseEntity.ok(
-                    "Final salary updated successfully. " +
-                    "Employee: " + employeeName +
-                    ", Per-hour salary: " +
-                    formatMoney(perHourSalary) +
-                    ", Final working hours: " +
-                    formatNumber(afterMIS_FinalWorkHrs) +
-                    ", Final salary: " +
-                    formatMoney(
-                            afterAllCalculationCompleted_TotalSalary
-                    )
-            );
-
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity
-                    .badRequest()
-                    .body("Validation error: " + e.getMessage());
-
-        } catch (Exception e) {
-            return ResponseEntity
-                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(
-                            "Final salary calculation failed: " +
-                            e.getMessage()
-                    );
-        }
+    if (!workingHourCalculationCompleted) {
+        return ResponseEntity
+                .badRequest()
+                .body(
+                        "Please execute WorkingHourCount API " +
+                        "before AdvanceSalaryCalculation API."
+                );
     }
 
+    if (advanceCalculation == null) {
+        return ResponseEntity
+                .badRequest()
+                .body(
+                        "Advance calculation request is required."
+                );
+    }
+
+    double holidayHours =
+            advanceCalculation.getHolidayHrs();
+
+    double misHours =
+            advanceCalculation.getMisHrs();
+
+    double advanceSalary =
+            advanceCalculation.getAdvance();
+
+    if (!Double.isFinite(holidayHours) ||
+            !Double.isFinite(misHours) ||
+            !Double.isFinite(advanceSalary)) {
+
+        return ResponseEntity
+                .badRequest()
+                .body(
+                        "Holiday hours, MIS hours and advance " +
+                        "salary must be valid numbers."
+                );
+    }
+
+    if (holidayHours < 0) {
+        return ResponseEntity
+                .badRequest()
+                .body("Holiday hours cannot be negative.");
+    }
+
+    if (misHours < 0) {
+        return ResponseEntity
+                .badRequest()
+                .body("MIS hours cannot be negative.");
+    }
+
+    if (advanceSalary < 0) {
+        return ResponseEntity
+                .badRequest()
+                .body("Advance salary cannot be negative.");
+    }
+
+    try {
+        afterMISandHolidayHrs_TotalCalculationHrs =
+                holidayHours + misHours;
+
+        afterMIS_FinalWorkHrs =
+                totalMonthlyWorkingHours +
+                afterMISandHolidayHrs_TotalCalculationHrs;
+
+        beforeAdvanceCalculation_TotalSalary =
+                afterMIS_FinalWorkHrs *
+                perHourSalary;
+
+        afterAllCalculationCompleted_TotalSalary =
+                beforeAdvanceCalculation_TotalSalary -
+                advanceSalary;
+
+        afterAllCalculationCompleted_TotalSalary =
+                Math.max(
+                        0,
+                        afterAllCalculationCompleted_TotalSalary
+                );
+
+        finalSalaryUpdate(
+                holidayHours,
+                misHours,
+                advanceSalary
+        );
+
+        return ResponseEntity.ok(
+                "Final salary updated successfully in " +
+                SOURCE_SHEET_NAME +
+                " and " +
+                PRINT_SHEET_NAME +
+                ". Employee: " +
+                formatEmployeeName(employeeName) +
+                ", Final working hours: " +
+                formatNumber(afterMIS_FinalWorkHrs) +
+                ", Final salary: " +
+                formatMoney(
+                        afterAllCalculationCompleted_TotalSalary
+                )
+        );
+
+    } catch (IllegalArgumentException e) {
+        return ResponseEntity
+                .badRequest()
+                .body(
+                        "Validation error: " +
+                        e.getMessage()
+                );
+
+    } catch (Exception e) {
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(
+                        "Final salary calculation failed: " +
+                        e.getMessage()
+                );
+    }
+}
     // ================================================================
     // FINAL SALARY EXCEL UPDATE
     // ================================================================
 
     public static void finalSalaryUpdate(
-            double holidayHours,
-            double misHours,
-            double advanceSalary) throws IOException {
+        double holidayHours,
+        double misHours,
+        double advanceSalary) throws IOException {
 
-        if (uploadedFileName == null ||
-                uploadedFileName.trim().isEmpty()) {
+    if (uploadedFileName == null ||
+            uploadedFileName.trim().isEmpty()) {
 
+        throw new IllegalArgumentException(
+                "No uploaded Excel file is available."
+        );
+    }
+
+    Path excelFilePath =
+            getSafeFilePath(uploadedFileName);
+
+    if (!Files.exists(excelFilePath)) {
+        throw new FileNotFoundException(
+                "Uploaded Excel file was not found."
+        );
+    }
+
+    try (FileInputStream inputStream =
+                 new FileInputStream(
+                         excelFilePath.toFile()
+                 );
+
+         XSSFWorkbook workbook =
+                 new XSSFWorkbook(inputStream)) {
+
+        XSSFSheet sourceSheet =
+                workbook.getSheet(SOURCE_SHEET_NAME);
+
+        XSSFSheet printSheet =
+                workbook.getSheet(PRINT_SHEET_NAME);
+
+        if (sourceSheet == null) {
             throw new IllegalArgumentException(
-                    "No uploaded Excel file is available."
+                    SOURCE_SHEET_NAME +
+                    " was not found."
             );
         }
 
-        if (employeeName == null ||
-                employeeName.trim().isEmpty()) {
-
+        if (printSheet == null) {
             throw new IllegalArgumentException(
-                    "Employee name is not available."
+                    PRINT_SHEET_NAME +
+                    " was not found. Run WorkingHourCount first."
             );
         }
 
-        Path excelFilePath =
-                getSafeFilePath(uploadedFileName);
+        writeOrReplaceFinalSummaryInSourceSheet(
+                workbook,
+                sourceSheet,
+                holidayHours,
+                misHours,
+                advanceSalary
+        );
 
-        try (FileInputStream fileInputStream =
-                     new FileInputStream(excelFilePath.toFile());
+        updateFinalCalculationInPrintSheet(
+                workbook,
+                printSheet,
+                holidayHours,
+                misHours,
+                advanceSalary
+        );
 
-             XSSFWorkbook workbook =
-                     new XSSFWorkbook(fileInputStream)) {
+        try (FileOutputStream outputStream =
+                     new FileOutputStream(
+                             excelFilePath.toFile()
+                     )) {
 
-            XSSFSheet sheet =
-                    workbook.getSheet("Sheet1");
-
-            if (sheet == null) {
-                throw new IllegalArgumentException(
-                        "Sheet1 was not found in the Excel file."
-                );
-            }
-
-            XSSFCellStyle style =
-                    createFinalSummaryStyle(workbook);
-
-            List<String> columnNameList =
-                    getColumnNameList();
-
-            List<Object> columnValueList =
-                    getColumnValueList(
-                            holidayHours,
-                            misHours,
-                            advanceSalary
-                    );
-
-            if (columnNameList.size() !=
-                    columnValueList.size()) {
-
-                throw new IllegalStateException(
-                        "Column name count and column value count " +
-                        "do not match."
-                );
-            }
-
-            /*
-             * Add one blank row after the existing data.
-             */
-            int headerRowIndex =
-                    sheet.getLastRowNum() + 2;
-
-            int dataRowIndex =
-                    headerRowIndex + 1;
-
-            Row headerRow =
-                    sheet.createRow(headerRowIndex);
-
-            Row dataRow =
-                    sheet.createRow(dataRowIndex);
-
-            for (int columnIndex = 0;
-                 columnIndex < columnNameList.size();
-                 columnIndex++) {
-
-                Cell headerCell =
-                        headerRow.createCell(columnIndex);
-
-                headerCell.setCellValue(
-                        columnNameList.get(columnIndex)
-                );
-
-                headerCell.setCellStyle(style);
-
-                Cell dataCell =
-                        dataRow.createCell(columnIndex);
-
-                Object value =
-                        columnValueList.get(columnIndex);
-
-                setCellValue(dataCell, value);
-
-                dataCell.setCellStyle(style);
-
-                sheet.autoSizeColumn(columnIndex);
-            }
-
-            try (FileOutputStream fileOutputStream =
-                         new FileOutputStream(
-                                 excelFilePath.toFile()
-                         )) {
-
-                workbook.write(fileOutputStream);
-            }
+            workbook.write(outputStream);
         }
     }
+}
+
 
     // ================================================================
     // FINAL EXCEL COLUMN NAMES
@@ -1234,6 +2276,305 @@ public class DemoController {
 
         return columnValueList;
     }
+
+    private static void writeOrReplaceFinalSummaryInSourceSheet(
+        XSSFWorkbook workbook,
+        XSSFSheet sourceSheet,
+        double holidayHours,
+        double misHours,
+        double advanceSalary) {
+
+    removeRowByMarker(
+            sourceSheet,
+            FINAL_SUMMARY_MARKER,
+            3
+    );
+
+    XSSFCellStyle style =
+            createFinalSummaryStyle(workbook);
+
+    List<String> columnNames =
+            getColumnNameList();
+
+    List<Object> columnValues =
+            getColumnValueList(
+                    holidayHours,
+                    misHours,
+                    advanceSalary
+            );
+
+    int markerRowIndex =
+            sourceSheet.getLastRowNum() + 2;
+
+    int headerRowIndex =
+            markerRowIndex + 1;
+
+    int valueRowIndex =
+            markerRowIndex + 2;
+
+    Row markerRow =
+            sourceSheet.createRow(markerRowIndex);
+
+    Cell markerCell =
+            markerRow.createCell(0);
+
+    markerCell.setCellValue(
+            FINAL_SUMMARY_MARKER
+    );
+
+    markerCell.setCellStyle(style);
+
+    Row headerRow =
+            sourceSheet.createRow(headerRowIndex);
+
+    Row valueRow =
+            sourceSheet.createRow(valueRowIndex);
+
+    for (int columnIndex = 0;
+         columnIndex < columnNames.size();
+         columnIndex++) {
+
+        Cell headerCell =
+                headerRow.createCell(columnIndex);
+
+        headerCell.setCellValue(
+                columnNames.get(columnIndex)
+        );
+
+        headerCell.setCellStyle(style);
+
+        Cell valueCell =
+                valueRow.createCell(columnIndex);
+
+        setCellValue(
+                valueCell,
+                columnValues.get(columnIndex)
+        );
+
+        valueCell.setCellStyle(style);
+
+        sourceSheet.autoSizeColumn(columnIndex);
+    }
+}
+
+private static void updateFinalCalculationInPrintSheet(
+        XSSFWorkbook workbook,
+        XSSFSheet printSheet,
+        double holidayHours,
+        double misHours,
+        double advanceSalary) {
+
+    int markerRowIndex =
+            findRowByFirstCellValue(
+                    printSheet,
+                    PRINT_FINAL_MARKER
+            );
+
+    if (markerRowIndex < 0) {
+        throw new IllegalArgumentException(
+                "Final calculation section was not found in " +
+                PRINT_SHEET_NAME
+        );
+    }
+
+    XSSFCellStyle labelStyle =
+            createPrintTotalLabelStyle(workbook);
+
+    XSSFCellStyle valueStyle =
+            createPrintTotalValueStyle(workbook);
+
+    createOrUpdatePrintFinalCalculationRows(
+            printSheet,
+            markerRowIndex + 1,
+            holidayHours,
+            misHours,
+            advanceSalary,
+            labelStyle,
+            valueStyle
+    );
+}
+
+private static void createOrUpdatePrintFinalCalculationRows(
+        XSSFSheet printSheet,
+        int startingRowIndex,
+        double holidayHours,
+        double misHours,
+        double advanceSalary,
+        XSSFCellStyle labelStyle,
+        XSSFCellStyle valueStyle) {
+
+    int rowIndex = startingRowIndex;
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Employee Name",
+            formatEmployeeName(employeeName),
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Per Hour Salary",
+            perHourSalary,
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Before Total Working Hours",
+            totalMonthlyWorkingHours,
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Before Total Salary",
+            totalSalaryPerMonth,
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Holiday Hours",
+            holidayHours,
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "MIS Hours",
+            misHours,
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "MIS + Holiday Hours",
+            afterMISandHolidayHrs_TotalCalculationHrs,
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Final Working Hours",
+            afterMIS_FinalWorkHrs,
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Salary Before Advance",
+            beforeAdvanceCalculation_TotalSalary,
+            labelStyle,
+            valueStyle
+    );
+
+    rowIndex = createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Advance Salary",
+            advanceSalary,
+            labelStyle,
+            valueStyle
+    );
+
+    createPrintCalculationRow(
+            printSheet,
+            rowIndex,
+            "Final Salary",
+            afterAllCalculationCompleted_TotalSalary,
+            labelStyle,
+            valueStyle
+    );
+}
+
+    private static int findRowByFirstCellValue(
+        XSSFSheet sheet,
+        String expectedValue) {
+
+    for (int rowIndex = 0;
+         rowIndex <= sheet.getLastRowNum();
+         rowIndex++) {
+
+        Row row =
+                sheet.getRow(rowIndex);
+
+        if (row == null) {
+            continue;
+        }
+
+        Cell firstCell =
+                row.getCell(
+                        0,
+                        Row.MissingCellPolicy
+                                .RETURN_BLANK_AS_NULL
+                );
+
+        if (firstCell == null) {
+            continue;
+        }
+
+        if (expectedValue.equalsIgnoreCase(
+                getCellValue(firstCell))) {
+
+            return rowIndex;
+        }
+    }
+
+    return -1;
+}
+
+private static void removeRowByMarker(
+        XSSFSheet sheet,
+        String marker,
+        int numberOfRows) {
+
+    int markerRowIndex =
+            findRowByFirstCellValue(
+                    sheet,
+                    marker
+            );
+
+    if (markerRowIndex < 0) {
+        return;
+    }
+
+    int lastRowToRemove =
+            Math.min(
+                    markerRowIndex + numberOfRows - 1,
+                    sheet.getLastRowNum()
+            );
+
+    for (int rowIndex =
+                 lastRowToRemove;
+         rowIndex >= markerRowIndex;
+         rowIndex--) {
+
+        Row row =
+                sheet.getRow(rowIndex);
+
+        if (row != null) {
+            sheet.removeRow(row);
+        }
+    }
+}
 
     // ================================================================
     // EXCEL STYLE METHODS
