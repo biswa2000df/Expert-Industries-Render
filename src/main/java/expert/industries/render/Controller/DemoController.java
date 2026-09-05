@@ -964,6 +964,7 @@ public class DemoController {
         salaryMap.put("salim mohameed", 106.25);
         salaryMap.put("alim", 93.75);
         salaryMap.put("mahindra", 93.75);
+        salaryMap.put("pande", 110.00);
 
         return salaryMap;
     }
